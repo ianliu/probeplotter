@@ -1,95 +1,163 @@
-"""
- " Probe Plotter v0.1
- " Plot the data retrieved from a probe.
- """
 
-import drawer
-import reader
-import time
+"""
+
+Probe Plotter v0.1
+Plot the data retrieved from a probe.
+
+"""
+
 import serial
-import gobject
-import gtk
+import gtk, gobject
+from gtk import glade
+import drawer, reader
+from serial.serialutil import SerialException
 
 gobject.threads_init()
 
-def min_max(data_list):
-    first = data_list[0]
-    last  = data_list[len(data_list) -1]
-    minT = first[0]
-    maxT = last[0]
-    minP = first[1]
-    maxP = first[1]
-    for data in data_list:
-        if maxP < data[1]: maxP = data[1]
-        elif minP > data[1]: minP = data[1]
-    return (minT, maxT, minP, maxP)
 
-class ProbePlotter(drawer.Stage):
-    def __init__(self, data):
-        """
-            @param data: The data list.
-        """
-        drawer.Stage.__init__(self)
-        self.data = data
-    
-    def draw(self, ctx, width, height):
-        length = len(self.data)
-        if length < 2: return
-        minT, maxT, minP, maxP = min_max(self.data)
-        ts = float( width ) / ( maxT - minT )
-        if minP == maxP:
-            yoffset = height / 2
-            ys = 0
-        else:
-            yoffset = 0
-            ys = float( width ) / ( maxP - minP )
-        ctx.set_source_rgb(0, 0, 0)
-        ctx.move_to(0, yoffset + ys * (self.data[0][1] - minP))
-        for i in xrange(1, length):
-            point = self.data[i]
-            ctx.line_to((point[0] - minT) * ts, yoffset + (point[1] - minP) * ys)
-        ctx.stroke()
+###
+## CONSTANTS
+###
+CLT_SPY		= 1
+MOD_4_20	= 2
+SPY			= 3
 
-class ProbeReader(reader.SerialLineReader):
-    def __init__(self, conn, shared_list, data_len, max_points = 100):
-        reader.SerialLineReader.__init__(self, conn)
-        self.data_len = data_len
-        self.shared_list = shared_list
-        self.max_points = max_points
-        self.output = None
-    
-    def set_output(self, fileName):
-        self.output = open(fileName, "w")
-    
-    def on_data(self, data):
-        instant = int( 1000 * time.time() )
-        if len(data) != self.data_len:
-            print "Data length error: ", data
-        else:
-            value = int( data.split(',')[2] )
-            self.shared_list.append((instant, value))
-            if len(self.shared_list) > self.max_points:
-                self.shared_list.pop(0)
-            if self.output:
-                self.output.write(data + "\n")
+class Conf:
+	
+	"""
+	
+	This class keeps some configurations
+	for the program.
+	It also should provide methods for
+	saving those in a .ini file.
+	
+	"""
+	
+	def __init__(self):
+		self.port = None
+		self.source = SPY
+		self.xonxoff = 1
+		self.baudrate = 19200
+	
+	def serial(self):
+		return {
+			'port': self.port,
+			'baudrate': self.baudrate,
+			'xonxoff': self.xonxoff
+		}
 
-data = []
-cnx = serial.Serial("/dev/ttyUSB0", 19200, xonxoff=1)
+class Props:
+	
+	"""
+	The properties Dialog from glade file. 
+	"""
+	
+	def __init__(self, file, conf):
+		
+		"""
+		@param file: The glade file path.
+		@param conf: The configuration object.
+		"""
+		self.conf = conf
+		self.gui = glade.XML(file, 'dialog_properties')
+		self.gui.signal_autoconnect(self)
+		self.dialog = self.gui.get_widget('dialog_properties')
+		self.entry = self.gui.get_widget('dialog_port')
+	
+	def show(self):
+		
+		"""
+		Shows this Properties Dialog.
+		"""
+		self.dialog.show()
 
-rdr = ProbeReader(cnx, data, 18)
-plt = ProbePlotter(data)
+	def hide(self):
+		
+		"""
+		Hides this Properties Dialog
+		"""
+		self.dialog.hide()
 
-rdr.start()
-plt.init_anim(33)
 
-def on_quit(window, event):
-    gtk.main_quit()
-    rdr.running = False
-    rdr.join()
+	#--------------------------------------------------------------------------
+	# Signals Handlers
+	#--------------------------------------------------------------------------
+	def on_dialog_properties_response(self, dialog, response):
+		"""
+		When Dialog receives a response.
+		"""
+		if response == 1: # OK
+			self.conf.port = self.entry.get_text()
+		self.hide()
+		print self.conf
+	
+	def on_dialog_source_toggled(self, button):
+		"""
+		Updates the source from the users choice.
+		"""
+		print button.get_selected()
 
-wnd = gtk.Window()
-wnd.add(plt)
-wnd.show_all()
-wnd.connect("delete-event", on_quit)
+class Main:
+	
+	"""
+	Main class.
+	"""
+	
+	def __init__(self, file):
+		
+		# The shared data list
+		self.data = []
+		
+		# Configuration
+		self.conf = Conf()
+		
+		# Reader & Drawer
+		self.reader = None
+		self.drawer = None
+		
+		# The properties dialog window
+		self.props = Props(file, self.conf)
+		
+		# Main GUI
+		self.gui = glade.XML(file, "window_main")
+		self.gui.signal_autoconnect(self)
+		self.window = self.gui.get_widget('window_main')
+		self.props.dialog.set_transient_for(window)
+	
+	
+	
+	def start(self):
+		
+		"""
+		Starts plotting data
+		"""
+		try:
+			self.conn = serial.Serial( ** self.conf.serial() )
+			self.reader = serial.ProbeReader(self.conn, self.data, 18)
+			self.reader.start()
+			self.drawer.init_anim(66)
+		except SerialException, msg:
+			print 'Error:', msg
+	
+	#--------------------------------------------------------------------------
+	# Signals Handlers
+	#--------------------------------------------------------------------------
+	def on_window_main_delete_event(self, window, event):
+		gtk.main_quit()
+        try:
+    		self.reader.running = False
+    		self.reader.join()
+        except:
+            pass
 
-gtk.main()
+	def on_tool_properties_clicked(self, button):
+		self.props.show()
+	
+	def on_tool_save_clicked(self, button):
+		print 'save'
+
+if __name__ == "__main__":
+	main = Main('../../resources/gui.glade')
+	window = main.gui.get_widget('window_main')
+	window.show_all()
+	gtk.main()
