@@ -8,6 +8,7 @@ import gtk
 import gobject
 
 from gtk import glade
+from reader import FAKE_READER, SPY_READER
 
 def min_max(data_list):
 	first = data_list[0]
@@ -135,6 +136,12 @@ class ProbePlotter(Stage):
 		ctx.stroke()
 
 
+class ToolLabel(gtk.ToolItem):
+	def __init__(self, text):
+		gtk.ToolItem.__init__(self)
+		label = gtk.Label(text)
+		self.add(label)
+
 
 class ConfigDialog(gtk.Dialog):
 	def __init__(self, title, parent):
@@ -195,7 +202,10 @@ class FakeConfig(gtk.Frame):
 		self.spin = spin
 	
 	def get_config(self):
-		return {'interval': self.spin.get_value()}
+		return {
+			'id': FAKE_READER,
+			'interval': self.spin.get_value()
+		}
 
 
 class SpyConfig(gtk.Frame):
@@ -234,6 +244,7 @@ class SpyConfig(gtk.Frame):
 	
 	def get_config(self):
 		return {
+			'id' : SPY_READER,
 			'port': self.combo.get_active(),
 			'data_size': self.spin.get_value()
 		}

@@ -9,6 +9,9 @@ from threading import Thread, Event, Lock
 import random
 import time
 
+FAKE_READER = 0
+SPY_READER  = 1
+
 class SerialLineReader(Thread):
 	
     """
