@@ -21,11 +21,17 @@ def min_max(data_list):
 		elif minP > data[1]: minP = data[1]
 	return (minT, maxT, minP, maxP)
 
+
+
+
+
 class Stage(gtk.DrawingArea):
 	
 	"""
 	
-	The Stage.
+	The Stage class offers a loop for animating.
+	It should be extended and the draw method
+	overridden.
 	
 	"""
 	
@@ -36,12 +42,11 @@ class Stage(gtk.DrawingArea):
 		@param clear_color: The background color
 		"""
 		gtk.DrawingArea.__init__(self)
-		self.connect("expose-event", self._on_expose_event)
-		self.clear_color = clear_color
 		self.time = 0
-		
-		# Private
 		self._anim = False
+		self.clear_color = clear_color
+		self.connect("expose-event", self._on_expose_event)
+		
 	
 	def draw(self, ctx, width, height):
 		
@@ -88,6 +93,9 @@ class Stage(gtk.DrawingArea):
 		self.queue_draw()
 		return self._anim
 
+
+
+
 class ProbePlotter(Stage):
 	
 	"""
@@ -109,8 +117,9 @@ class ProbePlotter(Stage):
 		Draws the graphic.
 		"""
 		length = len(self.data)
+		if length < 2: return
 		minT, maxT, minP, maxP = min_max(self.data)
-		if length < 2 or minT == maxT: return
+		if minT == maxT: return
 		ts = float( width ) / ( maxT - minT )
 		if minP == maxP:
 			yoffset = height / 2
@@ -124,4 +133,112 @@ class ProbePlotter(Stage):
 			point = self.data[i]
 			ctx.line_to((point[0] - minT) * ts, yoffset + (point[1] - minP) * ys)
 		ctx.stroke()
+
+
+
+class ConfigDialog(gtk.Dialog):
+	def __init__(self, title, parent):
+		gtk.Dialog.__init__(self, title, parent,
+						gtk.DIALOG_MODAL | gtk.DIALOG_DESTROY_WITH_PARENT,
+						(gtk.STOCK_CANCEL, gtk.RESPONSE_CANCEL,
+						gtk.STOCK_OK, gtk.RESPONSE_APPLY))
+		
+		self.container = gtk.Viewport()
+		self.container.set_shadow_type(gtk.SHADOW_NONE)
+		self.current = None
+		self.pages = []
+		self.combo = gtk.combo_box_new_text()
+		
+		box = gtk.HButtonBox()
+		box.add(self.combo)
+		
+		self.vbox.pack_start(box, False)
+		self.vbox.add(self.container)
+		self.vbox.show_all()
+		self.vbox.set_spacing(10)
+		self.combo.connect('changed', self.on_changed)
+		self.set_has_separator(False)
+	
+	def on_changed(self, cb):
+		i = cb.get_active()
+		child = self.container.get_child()
+		if child: self.container.remove(child)
+		self.container.add(self.pages[i])
+		self.pages[i].show_all()
+		self.current = self.pages[i]
+	
+	def add_page(self, page):
+		self.pages.append(page)
+		self.combo.append_text(page.name)
+		if not self.current:
+			self.combo.set_active(0)
+			self.current = page
+	
+	def get_config(self):
+		return self.current.get_config()
+
+
+class FakeConfig(gtk.Frame):
+	def __init__(self):
+		gtk.Frame.__init__(self, 'Fake reader configuration')
+		self.set_name('Fake reader')
+		self.set_shadow_type(gtk.SHADOW_OUT)
+		
+		box   = gtk.HButtonBox()
+		label = gtk.Label('Interval (in seconds)')
+		adj   = gtk.Adjustment(1, 0.1, 1, 0.1)
+		spin  = gtk.SpinButton(adj, 0, 2)
+		spin.set_numeric(True)
+		box.add(label)
+		box.add(spin)
+		self.add(box)
+		self.spin = spin
+	
+	def get_config(self):
+		return {'interval': self.spin.get_value()}
+
+
+class SpyConfig(gtk.Frame):
+	def __init__(self):
+		gtk.Frame.__init__(self, 'Spy configuration')
+		self.set_name("Spy reader")
+		vbox = gtk.VBox()
+		size = gtk.SizeGroup(gtk.SIZE_GROUP_HORIZONTAL)
+		
+		box = gtk.HBox()
+		label = gtk.Label("Serial port:")
+		combo = gtk.combo_box_entry_new_text()
+		size.add_widget(combo)
+		box.add(label)
+		box.pack_start(combo, False, False)
+		vbox.add(box)
+
+		combo.append_text("COM1")
+		combo.append_text("COM2")
+		combo.append_text("COM3")
+		combo.append_text("COM4")
+		combo.set_active(0)
+		self.combo = combo
+
+		box = gtk.HBox()
+		label = gtk.Label("Data size:")
+		adjust = gtk.Adjustment(18, 0, 50, 1)
+		spin = gtk.SpinButton(adjust)
+		size.add_widget(spin)
+		box.add(label)
+		box.pack_start(spin, False, False)
+		vbox.add(box)
+		self.spin = spin
+
+		self.add(vbox)
+	
+	def get_config(self):
+		return {
+			'port': self.combo.get_active(),
+			'data_size': self.spin.get_value()
+		}
+		
+		
+
+
 
