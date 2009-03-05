@@ -21,30 +21,56 @@ class MainWindow(gtk.Window):
 		gtk.Window.__init__(self)
 		
 		# These variables are to be chosen by the user
-		# TODO: Implement a parser and make reader receive it
-		self.parser         = None
 		self.reader         = None
 		self.drawer         = None
+		self.info           = None # Keep this for initialization purposes
+		self.data           = []
 		
 		self.__layout()
 		self.__connect_signals()
+	
+	def connect_probe(self):
+		info = self.info
+		if info['id'] == reader.FAKE_READER:
+			self.reader = reader.FakeReader(self.data, info['interval'])
+		elif info['id'] == reader.SPY_READER:
+			conn = serial.Serial(info['port'], 19200, xonxoff=1)
+			self.reader = reader.ProbeReader(conn, self.data, info['data_size'])
+		
+		self.drawer = drawer.ProbePlotter(self.data)
+		self.reader.start()
+		self.drawer.init_anim(66)
+		self.container.add(self.drawer)
+		self.drawer.show()
+	
+	def disconnect_probe(self):
+		child = self.container.get_child()
+		if child:
+			self.container.remove(child)
+			child.destroy()
+		self.reader.running = False
+		self.reader.join()
+		self.data = []
 	
 	def __layout(self):
 		# Widget creation
 		vbox                = gtk.VBox()
 		tool                = gtk.Toolbar()
+		yes_radio           = gtk.RadioToolButton(None, gtk.STOCK_YES)
+		no_radio            = gtk.RadioToolButton(yes_radio, gtk.STOCK_NO)
 		self.statusbar      = gtk.Statusbar()
 		self.status_context = self.statusbar.get_context_id('MainWindow')
 		self.container      = gtk.Viewport()
 		self.config_dialog  = drawer.ConfigDialog('Configuration Dialog', self)
 		self.connect_btn    = gtk.ToggleToolButton(gtk.STOCK_CONNECT)
-		self.save_btn       = gtk.ToolButton(gtk.STOCK_SAVE)
 		self.configure_btn  = gtk.ToolButton(gtk.STOCK_PREFERENCES)
 		
 		# Packing
 		tool.insert(self.connect_btn, -1)
 		tool.insert(gtk.SeparatorToolItem(), -1)
-		tool.insert(self.save_btn, -1)
+		tool.insert(drawer.ToolLabel("  Capture?  "), -1)
+		tool.insert(yes_radio, -1)
+		tool.insert(no_radio, -1)
 		tool.insert(gtk.SeparatorToolItem(), -1)
 		tool.insert(self.configure_btn, -1)
 		vbox.pack_start(tool, False)
@@ -74,13 +100,20 @@ class MainWindow(gtk.Window):
 		if btn.get_active():
 			btn.set_stock_id(gtk.STOCK_DISCONNECT)
 			self.connect_btn.set_tooltip_markup("Disconnect")
+			if self.info:
+				self.connect_probe()
+			else:
+				self.__configure_clicked(self.config_dialog)
 		else:
 			btn.set_stock_id(gtk.STOCK_CONNECT)
 			self.connect_btn.set_tooltip_markup("Connect")
+			self.disconnect_probe()
 
 	def __configure_clicked(self, btn):
 		response = self.config_dialog.run()
-		print response, self.config_dialog.get_config()
+		if self.connect_btn.get_active() and response == gtk.RESPONSE_APPLY:
+			self.info = self.config_dialog.get_config()
+			self.connect_probe()
 		self.config_dialog.hide()
 	
 	def __quit(self, window):
@@ -91,113 +124,3 @@ class MainWindow(gtk.Window):
 if __name__ == "__main__":
 	MainWindow()
 	gtk.main()
-
-class Main:
-	
-	def __init__(self, file):
-		
-		# The shared data list
-		self.data = []
-		
-		# Configuration
-		self.conf = Conf()
-		
-		# Reader & Drawer
-		self.reader = None
-		self.drawer = None
-		
-		# The properties dialog window
-		self.props = Props(file, self.conf)
-		
-		# Main GUI
-		self.gui = glade.XML(file, "window_main")
-		self.gui.signal_autoconnect(self)
-		self.window = self.gui.get_widget('window_main')
-		self.props.dialog.set_transient_for(self.window)
-		self.connect_btn = self.gui.get_widget('tool_connect')
-		
-		status = self.gui.get_widget('statusbar')
-		self.statusbar = (status.get_context_id('main'), status)
-		self.set_status_message('Disconnected')
-	
-	
-	
-	def start(self):
-		
-		"""
-		Starts plotting data
-		"""
-		try:
-			# TODO: Select appropriate reader according to "conf.source"
-			print self.conf.source
-			if self.conf.source == SPY:
-				self.conn = serial.Serial( ** self.conf.serial() )
-				self.reader = reader.ProbeReader(self.conn, self.data, 18)
-			elif self.conf.source == FAKE_READER:
-				self.reader = reader.FakeReader(self.data, 1)
-			
-			# Swap the label with the plotter
-			container = self.gui.get_widget('container')
-			container_lbl = self.gui.get_widget('container_label')
-			if container_lbl:
-				container.remove(container_lbl)
-			self.drawer = drawer.ProbePlotter(self.data)
-			container.add(self.drawer)
-			self.drawer.show()
-			
-			self.reader.start()
-			self.drawer.init_anim(66)
-			self.set_status_message("Connected")
-			
-		except SerialException, e:
-			print 'Error:', e.message
-			self.set_status_message('Error: '+e.message)
-			error = gtk.MessageDialog(self.window, type = gtk.MESSAGE_ERROR)
-			error.set_markup(e.message)
-			error.format_secondary_text('foo')
-			error.format_secondary_markup('bar')
-			error.show()
-			self.connect_btn.set_active(False)
-			
-	
-	
-	def stop(self):
-		if self.drawer:
-			container = self.gui.get_widget('container')
-			container.remove(self.drawer)
-			self.drawer.stop_anim()
-			self.reader.running = False
-			self.set_status_message("Disconnected")
-	
-	def set_status_message(self, msg):
-		"""
-		Set the status bar message
-		"""
-		id, bar = self.statusbar
-		bar.pop(id)
-		bar.push(id, msg)
-	
-	#--------------------------------------------------------------------------
-	# Signals Handlers
-	#--------------------------------------------------------------------------
-	def on_window_main_delete_event(self, window, event):
-		try:
-			self.reader.running = False
-			self.reader.join()
-		except:
-			pass
-		gtk.main_quit()
-
-	def on_tool_properties_clicked(self, button):
-		self.props.show()
-	
-	def on_tool_save_clicked(self, button):
-		print 'save'
-	
-	def on_tool_connect_toggled(self, button):
-		if button.get_active():
-			self.start()
-		else:
-			self.stop()
-
-
